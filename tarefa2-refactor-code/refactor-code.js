@@ -1,377 +1,284 @@
-class LegacyOrderProcessor {
-  processOrder(orderData, userInfo, paymentInfo, shippingInfo, promoInfo) {
-    var total = 0;
-    var subtotal = 0;
-    var tax = 0;
-    var shipping = 0;
-    var discount = 0;
-    var finalTotal = 0;
-    var temp1 = 0;
-    var temp2 = 0;
-    var temp3 = 0;
-    var unusedVar1 = "não usado";
-    var unusedVar2 = 123;
-    var unusedVar3 = true;
+// order-processor.js
 
-    if (orderData != null) {
-      if (orderData.items != null) {
-        if (orderData.items.length > 0) {
-          for (var i = 0; i < orderData.items.length; i++) {
-            var item = orderData.items[i];
-            if (item != null) {
-              if (item.price != null) {
-                if (item.quantity != null) {
-                  if (item.price > 0) {
-                    if (item.quantity > 0) {
-                      subtotal = subtotal + (item.price * item.quantity);
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+/**
+ * @typedef {{ id?: string, price?: number, quantity?: number }} OrderItem
+ * @typedef {{ items?: OrderItem[] }} OrderData
+ * @typedef {{ type?: 'VIP'|'GOLD'|'SILVER'|'BRONZE'|'REGULAR', state?: string, level?: 'PREMIUM'|'STANDARD'|'BASIC', email?: string, id?: string, address?: any, location?: 'EUROPE'|'USA'|'ASIA' }} UserInfo
+ * @typedef {{ method?: 'CREDIT_CARD'|'DEBIT_CARD'|'PAYPAL'|'BANK_TRANSFER'|'CRYPTO', type?: 'CARD'|'BANK'|'DIGITAL', amount?: number }} PaymentInfo
+ * @typedef {{ type?: 'EXPRESS'|'STANDARD'|'ECONOMY'|'PICKUP', speed?: 'FAST'|'MEDIUM'|'SLOW' }} ShippingInfo
+ * @typedef {{ code?: 'SAVE10'|'SAVE20'|'SAVE30'|'SAVE50'|'FREESHIP'|'BOGO', discount?: number }} PromoInfo
+ * @typedef {{ checkStock?: (id: string, qty: number) => boolean }} Inventory
+ */
 
-    if (userInfo != null) {
-      if (userInfo.type != null) {
-        if (userInfo.type == "VIP") {
-          discount = subtotal * 0.15;
-        } else if (userInfo.type == "GOLD") {
-          discount = subtotal * 0.10;
-        } else if (userInfo.type == "SILVER") {
-          discount = subtotal * 0.05;
-        } else if (userInfo.type == "BRONZE") {
-          discount = subtotal * 0.02;
-        } else if (userInfo.type == "REGULAR") {
-          discount = 0;
-        } else {
-          discount = 0;
-        }
-      }
-    }
+/**
+ * Util: arredonda para 2 casas com segurança.
+ */
+function round2(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
 
-    if (promoInfo != null) {
-      if (promoInfo.code != null) {
-        if (promoInfo.code == "SAVE10") {
-          discount = discount + (subtotal * 0.1);
-        } else if (promoInfo.code == "SAVE20") {
-          discount = discount + (subtotal * 0.2);
-        } else if (promoInfo.code == "SAVE30") {
-          discount = discount + (subtotal * 0.3);
-        } else if (promoInfo.code == "SAVE50") {
-          discount = discount + (subtotal * 0.5);
-        } else if (promoInfo.code == "FREESHIP") {
-          shipping = 0;
-        } else if (promoInfo.code == "BOGO") {
-          discount = discount + (subtotal * 0.5);
-        }
-      }
-    }
+/**
+ * Soma subtotal dos itens válidos.
+ */
+function computeSubtotal(items = []) {
+  return items
+    .filter(it => it && typeof it.price === 'number' && typeof it.quantity === 'number' && it.price > 0 && it.quantity > 0)
+    .reduce((acc, it) => acc + it.price * it.quantity, 0);
+}
 
-    if (shippingInfo != null) {
-      if (shippingInfo.type != null) {
-        if (shippingInfo.type == "EXPRESS") {
-          shipping = 25;
-        } else if (shippingInfo.type == "STANDARD") {
-          shipping = 15;
-        } else if (shippingInfo.type == "ECONOMY") {
-          shipping = 8;
-        } else if (shippingInfo.type == "PICKUP") {
-          shipping = 0;
-        }
-      }
-    }
+/**
+ * Descontos por tipo de usuário (versão "processOrder").
+ */
+const USER_TIER_DISCOUNT = {
+  VIP: 0.15,
+  GOLD: 0.10,
+  SILVER: 0.05,
+  BRONZE: 0.02,
+  REGULAR: 0.0
+};
 
-    if (userInfo != null) {
-      if (userInfo.state != null) {
-        if (userInfo.state == "CA") {
-          tax = (subtotal - discount) * 0.0875;
-        } else if (userInfo.state == "NY") {
-          tax = (subtotal - discount) * 0.08;
-        } else if (userInfo.state == "TX") {
-          tax = (subtotal - discount) * 0.0625;
-        } else if (userInfo.state == "FL") {
-          tax = 0;
-        } else {
-          tax = (subtotal - discount) * 0.05;
-        }
-      }
-    }
+/**
+ * Frete por tipo.
+ */
+const SHIPPING_BY_TYPE = {
+  EXPRESS: 25,
+  STANDARD: 15,
+  ECONOMY: 8,
+  PICKUP: 0
+};
 
-    var paymentFee = 0;
-    if (paymentInfo != null) {
-      if (paymentInfo.method != null) {
-        if (paymentInfo.method == "CREDIT_CARD") {
-          paymentFee = (subtotal - discount) * 0.029;
-        } else if (paymentInfo.method == "DEBIT_CARD") {
-          paymentFee = (subtotal - discount) * 0.015;
-        } else if (paymentInfo.method == "PAYPAL") {
-          paymentFee = (subtotal - discount) * 0.034;
-        } else if (paymentInfo.method == "BANK_TRANSFER") {
-          paymentFee = 0;
-        } else if (paymentInfo.method == "CRYPTO") {
-          paymentFee = (subtotal - discount) * 0.01;
-        }
-      }
-    }
+/**
+ * Taxas por estado (fallback 5%).
+ */
+const TAX_BY_STATE = {
+  CA: 0.0875,
+  NY: 0.08,
+  TX: 0.0625,
+  FL: 0.0
+};
 
-    if (false) {
-      console.log("Este código nunca executa");
-      var deadCode = 100;
-      deadCode = deadCode * 2;
-      deadCode = deadCode + 50;
-    }
+/**
+ * Taxa por método de pagamento (versão "processOrder").
+ */
+const PAY_FEE_BY_METHOD = {
+  CREDIT_CARD: 0.029,
+  DEBIT_CARD: 0.015,
+  PAYPAL: 0.034,
+  BANK_TRANSFER: 0.0,
+  CRYPTO: 0.01
+};
 
-    while (false) {
-      console.log("Loop infinito que nunca executa");
-      var infiniteLoop = 0;
-      infiniteLoop = infiniteLoop + 1;
-    }
-
-    if (true || false) {
-      var alwaysTrue = 1;
-      var anotherVar = 2;
-      anotherVar = anotherVar * 3;
-      anotherVar = anotherVar + 5;
-    }
-
-    finalTotal = subtotal - discount + tax + shipping + paymentFee;
-
-    if (finalTotal < 0) {
-      finalTotal = 0;
-    }
-
-    finalTotal = Math.round(finalTotal * 100) / 100;
-
-    var unused1 = finalTotal;
-    var unused2 = finalTotal * 2;
-    var unused3 = finalTotal / 2;
-
-    return finalTotal;
-  }
-
-  calculateOrderTotal(order, customer, payment, delivery, coupon) {
-    var sum = 0;
-    var baseAmount = 0;
-    var userDiscount = 0;
-    var couponDiscount = 0;
-    var deliveryCost = 0;
-    var taxAmount = 0;
-    var paymentCost = 0;
-    var total = 0;
-    var x = 0;
-    var y = 0;
-    var z = 0;
-
-    if (order) {
-      if (order.products) {
-        for (var j = 0; j < order.products.length; j++) {
-          var product = order.products[j];
-          if (product) {
-            if (product.cost) {
-              if (product.count) {
-                sum = sum + product.cost * product.count;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    baseAmount = sum;
-
-    if (customer) {
-      if (customer.level) {
-        if (customer.level == "PREMIUM") {
-          userDiscount = baseAmount * 0.2;
-        } else if (customer.level == "STANDARD") {
-          userDiscount = baseAmount * 0.1;
-        } else if (customer.level == "BASIC") {
-          userDiscount = baseAmount * 0.05;
-        }
-      }
-    }
-
-    if (coupon) {
-      if (coupon.discount) {
-        couponDiscount = baseAmount * coupon.discount;
-      }
-    }
-
-    if (delivery) {
-      if (delivery.speed) {
-        if (delivery.speed == "FAST") {
-          deliveryCost = 30;
-        } else if (delivery.speed == "MEDIUM") {
-          deliveryCost = 15;
-        } else if (delivery.speed == "SLOW") {
-          deliveryCost = 5;
-        }
-      }
-    }
-
-    if (customer) {
-      if (customer.location) {
-        if (customer.location == "EUROPE") {
-          taxAmount = (baseAmount - userDiscount - couponDiscount) * 0.2;
-        } else if (customer.location == "USA") {
-          taxAmount = (baseAmount - userDiscount - couponDiscount) * 0.1;
-        } else if (customer.location == "ASIA") {
-          taxAmount = (baseAmount - userDiscount - couponDiscount) * 0.15;
-        }
-      }
-    }
-
-    if (payment) {
-      if (payment.type) {
-        if (payment.type == "CARD") {
-          paymentCost = (baseAmount - userDiscount - couponDiscount) * 0.03;
-        } else if (payment.type == "BANK") {
-          paymentCost = 0;
-        } else if (payment.type == "DIGITAL") {
-          paymentCost = (baseAmount - userDiscount - couponDiscount) * 0.02;
-        }
-      }
-    }
-
-    total = baseAmount - userDiscount - couponDiscount + taxAmount + deliveryCost + paymentCost;
-
-    if (total < 0) {
-      total = 0;
-    }
-
-    total = Math.round(total * 100) / 100;
-
-    return total;
-  }
-
-  validateAndProcessOrder(order, user, payment, shipping, promo, inventory, warehouse, logistics, notifications, analytics, audit, compliance) {
-    var isValid = true;
-    var errors = [];
-    var warnings = [];
-    var result = {};
-    var temp = 0;
-    var unused = "não usado";
-
-    if (order) {
-      if (order.items) {
-        if (order.items.length > 0) {
-          for (var i = 0; i < order.items.length; i++) {
-            var item = order.items[i];
-            if (item) {
-              if (item.id) {
-                if (item.quantity) {
-                  if (item.price) {
-                    if (item.quantity > 0) {
-                      if (item.price > 0) {
-                        if (inventory) {
-                          if (inventory.checkStock) {
-                            if (inventory.checkStock(item.id, item.quantity)) {
-                            } else {
-                              errors.push("Item " + item.id + " não disponível");
-                              isValid = false;
-                            }
-                          }
-                        }
-                      } else {
-                        errors.push("Preço inválido para item " + item.id);
-                        isValid = false;
-                      }
-                    } else {
-                      errors.push("Quantidade inválida para item " + item.id);
-                      isValid = false;
-                    }
-                  } else {
-                    errors.push("Preço não informado para item " + item.id);
-                    isValid = false;
-                  }
-                } else {
-                  errors.push("Quantidade não informada para item " + item.id);
-                  isValid = false;
-                }
-              } else {
-                errors.push("ID do item não informado");
-                isValid = false;
-              }
-            } else {
-              errors.push("Item inválido");
-              isValid = false;
-            }
-          }
-        } else {
-          errors.push("Pedido sem itens");
-          isValid = false;
-        }
-      } else {
-        errors.push("Itens do pedido não informados");
-        isValid = false;
-      }
-    } else {
-      errors.push("Pedido não informado");
-      isValid = false;
-    }
-
-    if (user) {
-      if (user.id) {
-        if (user.email) {
-          if (user.address) {
-          } else {
-            errors.push("Endereço do usuário não informado");
-            isValid = false;
-          }
-        } else {
-          errors.push("Email do usuário não informado");
-          isValid = false;
-        }
-      } else {
-        errors.push("ID do usuário não informado");
-        isValid = false;
-      }
-    } else {
-      errors.push("Usuário não informado");
-      isValid = false;
-    }
-
-    if (payment) {
-      if (payment.method) {
-        if (payment.amount) {
-          if (payment.amount > 0) {
-          } else {
-            errors.push("Valor do pagamento inválido");
-            isValid = false;
-          }
-        } else {
-          errors.push("Valor do pagamento não informado");
-          isValid = false;
-        }
-      } else {
-        errors.push("Método de pagamento não informado");
-        isValid = false;
-      }
-    } else {
-      errors.push("Informações de pagamento não fornecidas");
-      isValid = false;
-    }
-
-    if (false) {
-      console.log("Código morto");
-      var dead = 100;
-      dead = dead + 50;
-    }
-
-    if (true || false) {
-      var always = 1;
-      always = always * 2;
-    }
-
-    result.isValid = isValid;
-    result.errors = errors;
-    result.warnings = warnings;
-
-    return result;
+/**
+ * Promos comuns.
+ * Retorna { addDiscountRate?: number, freeShipping?: boolean }
+ */
+function resolvePromo(code) {
+  switch (code) {
+    case 'SAVE10': return { addDiscountRate: 0.10 };
+    case 'SAVE20': return { addDiscountRate: 0.20 };
+    case 'SAVE30': return { addDiscountRate: 0.30 };
+    case 'SAVE50': return { addDiscountRate: 0.50 };
+    case 'FREESHIP': return { freeShipping: true };
+    case 'BOGO': return { addDiscountRate: 0.50 }; // simplificado
+    default: return {};
   }
 }
 
-module.exports = { LegacyOrderProcessor };
+/**
+ * Motor de cálculo genérico.
+ * Aceita duas “dialetos” porque você tinha dois métodos duplicados com nomes diferentes.
+ * Use os campos que tiver, o motor se adapta.
+ *
+ * @param {{ order?: OrderData, user?: UserInfo, payment?: PaymentInfo, shipping?: ShippingInfo, promo?: PromoInfo }} ctx
+ * @param {'A'|'B'} dialect - 'A' replica regras de processOrder; 'B' replica calculateOrderTotal
+ */
+function computeTotals(ctx, dialect = 'A') {
+  const order = ctx.order ?? ctx.orderData;
+  const user = ctx.user ?? ctx.userInfo ?? ctx.customer;
+  const payment = ctx.payment ?? ctx.paymentInfo;
+  const shipping = ctx.shipping ?? ctx.shippingInfo ?? ctx.delivery;
+  const promo = ctx.promo ?? ctx.promoInfo ?? ctx.coupon;
+
+  const items = order?.items ?? order?.products ?? [];
+  const subtotal = computeSubtotal(items.map(p => ({
+    price: p.price ?? p.cost,
+    quantity: p.quantity ?? p.count
+  })));
+
+  // Desconto base por usuário
+  let baseDiscountRate = 0;
+  if (dialect === 'A') {
+    if (user?.type && USER_TIER_DISCOUNT[user.type] != null) {
+      baseDiscountRate = USER_TIER_DISCOUNT[user.type];
+    }
+  } else {
+    // dialect B: PREMIUM 20%, STANDARD 10%, BASIC 5%
+    if (user?.level === 'PREMIUM') baseDiscountRate = 0.20;
+    else if (user?.level === 'STANDARD') baseDiscountRate = 0.10;
+    else if (user?.level === 'BASIC') baseDiscountRate = 0.05;
+  }
+  const discountUser = subtotal * baseDiscountRate;
+
+  // Desconto via cupom/promo
+  let discountPromo = 0;
+  let freeShipping = false;
+
+  if (dialect === 'A') {
+    const { addDiscountRate = 0, freeShipping: fs } = resolvePromo(promo?.code);
+    freeShipping = Boolean(fs);
+    discountPromo = subtotal * addDiscountRate;
+  } else {
+    // dialect B: coupon.discount é uma taxa (0.05, 0.10, etc.)
+    if (typeof promo?.discount === 'number' && promo.discount > 0) {
+      discountPromo = subtotal * promo.discount;
+    }
+  }
+
+  const discount = discountUser + discountPromo;
+
+  // Frete
+  let shippingCost = 0;
+  if (dialect === 'A') {
+    shippingCost = SHIPPING_BY_TYPE[shipping?.type] ?? 0;
+  } else {
+    const MAP = { FAST: 30, MEDIUM: 15, SLOW: 5 };
+    shippingCost = MAP[shipping?.speed] ?? 0;
+  }
+  if (freeShipping) shippingCost = 0;
+
+  // Taxa
+  let taxableBase = Math.max(0, subtotal - discount);
+  let taxRate = 0;
+  if (dialect === 'A') {
+    taxRate = TAX_BY_STATE[user?.state] ?? 0.05;
+  } else {
+    const MAP = { EUROPE: 0.20, USA: 0.10, ASIA: 0.15 };
+    taxRate = MAP[user?.location] ?? 0.0;
+  }
+  const tax = taxableBase * taxRate;
+
+  // Tarifa pagamento
+  let payFeeRate = 0;
+  if (dialect === 'A') {
+    payFeeRate = PAY_FEE_BY_METHOD[payment?.method] ?? 0;
+  } else {
+    const MAP = { CARD: 0.03, BANK: 0.0, DIGITAL: 0.02 };
+    payFeeRate = MAP[payment?.type] ?? 0.0;
+  }
+  const paymentFee = taxableBase * payFeeRate;
+
+  // Total
+  let total = subtotal - discount + tax + shippingCost + paymentFee;
+  total = Math.max(0, round2(total));
+
+  return {
+    subtotal: round2(subtotal),
+    discountUser: round2(discountUser),
+    discountPromo: round2(discountPromo),
+    discount: round2(discount),
+    tax: round2(tax),
+    shipping: round2(shippingCost),
+    paymentFee: round2(paymentFee),
+    total
+  };
+}
+
+/**
+ * Validação de pedido: sem ninho de ifs, early-return, mensagens claras.
+ * @returns {{ isValid: boolean, errors: string[], warnings: string[] }}
+ */
+function validateOrder(order, user, payment, inventory) {
+  const errors = [];
+  const warnings = [];
+
+  // Pedido e itens
+  if (!order) {
+    errors.push('Pedido não informado');
+    return { isValid: false, errors, warnings };
+  }
+  if (!Array.isArray(order.items) || order.items.length === 0) {
+    errors.push('Pedido sem itens');
+    return { isValid: false, errors, warnings };
+  }
+
+  for (const item of order.items) {
+    if (!item) {
+      errors.push('Item inválido');
+      continue;
+    }
+    if (!item.id) errors.push('ID do item não informado');
+    if (!(item.quantity > 0)) errors.push(`Quantidade inválida para item ${item.id ?? '?'}`);
+    if (!(item.price > 0)) errors.push(`Preço inválido para item ${item.id ?? '?'}`);
+
+    // estoque, se disponível
+    if (inventory?.checkStock && item?.id && item?.quantity > 0) {
+      const ok = inventory.checkStock(String(item.id), Number(item.quantity));
+      if (!ok) errors.push(`Item ${item.id} não disponível`);
+    }
+  }
+
+  // Usuário
+  if (!user) {
+    errors.push('Usuário não informado');
+  } else {
+    if (!user.id) errors.push('ID do usuário não informado');
+    if (!user.email) errors.push('Email do usuário não informado');
+    if (!user.address) errors.push('Endereço do usuário não informado');
+  }
+
+  // Pagamento
+  if (!payment) {
+    errors.push('Informações de pagamento não fornecidas');
+  } else {
+    if (!payment.method && !payment.type) errors.push('Método de pagamento não informado');
+    if (!(payment.amount > 0)) errors.push('Valor do pagamento inválido ou não informado');
+  }
+
+  return { isValid: errors.length === 0, errors, warnings };
+}
+
+class OrderProcessor {
+  /**
+   * Compatível com o antigo processOrder.
+   * @param {OrderData} orderData
+   * @param {UserInfo} userInfo
+   * @param {PaymentInfo} paymentInfo
+   * @param {ShippingInfo} shippingInfo
+   * @param {PromoInfo} promoInfo
+   * @returns {number} total arredondado
+   */
+  processOrder(orderData, userInfo, paymentInfo, shippingInfo, promoInfo) {
+    return computeTotals(
+      { order: orderData, user: userInfo, payment: paymentInfo, shipping: shippingInfo, promo: promoInfo },
+      'A'
+    ).total;
+  }
+
+  /**
+   * Compatível com o antigo calculateOrderTotal.
+   * @returns {number} total arredondado
+   */
+  calculateOrderTotal(order, customer, payment, delivery, coupon) {
+    return computeTotals(
+      { order, user: customer, payment, shipping: delivery, promo: coupon },
+      'B'
+    ).total;
+  }
+
+  /**
+   * Novo: retorna breakdown completo, útil para exibir em UI ou auditar.
+   */
+  calculateOrderBreakdown(order, user, payment, shipping, promo, dialect = 'A') {
+    return computeTotals({ order, user, payment, shipping, promo }, dialect);
+  }
+
+  /**
+   * Valida pedido e dados essenciais.
+   * @returns {{ isValid: boolean, errors: string[], warnings: string[] }}
+   */
+  validateAndProcessOrder(order, user, payment, shipping, promo, inventory) {
+    return validateOrder(order, user, payment, inventory);
+  }
+}
+
+module.exports = { OrderProcessor, computeTotals, validateOrder };
